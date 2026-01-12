@@ -19,6 +19,14 @@ cp .env.example .env
 
 Set `PAGERDUTY_API_TOKEN` in `.env`.
 
+### macOS quickstart script
+
+Run the helper script below to create the Python virtual environment, install dependencies, set your PagerDuty API token, and open the notebook in Visual Studio Code:
+
+```bash
+./macos_setup_and_run.sh
+```
+
 ## Running the Notebook
 
 1. Launch Jupyter:
@@ -37,4 +45,3 @@ If ipywidgets are not rendering, enable the extension:
 ```bash
 jupyter nbextension enable --py widgetsnbextension
 ```
-
