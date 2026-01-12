@@ -1,0 +1,215 @@
+notebook:
+  name: pagerduty-usage-cost-report
+  purpose: >
+    Management-ready Jupyter Notebook for analyzing PagerDuty alert usage
+    and attributing PagerDuty product cost to services, teams, and escalation policies.
+  audience: management
+  language: en
+  execution_model: deterministic
+  codex_first: true
+
+globals:
+  assumptions:
+    - PagerDuty cost is attributed proportionally to alert volume
+    - PagerDuty does not price alerts individually
+  non_goals:
+    - Human labor cost
+    - On-call compensation
+    - Burnout or SLA penalties
+
+sections:
+
+  - id: CONFIG
+    title: Configuration
+    type: config
+    description: >
+      Static configuration values. No UI interaction here.
+    cells:
+      - type: code
+        name: pagerduty_config
+        content:
+          variables:
+            PAGERDUTY_API_TOKEN: env:PAGERDUTY_API_TOKEN
+            PAGERDUTY_API_BASE_URL: https://api.pagerduty.com
+            MONTHLY_PAGERDUTY_COST_USD: 4200
+            CACHE_DIR: ".cache"
+            CACHE_TTL_HOURS: 24
+
+  - id: UI
+    title: Report Controls
+    type: ui
+    description: >
+      Interactive controls for report scope and filtering.
+      Defaults must allow running the report without user interaction.
+    cells:
+      - type: code
+        name: ui_controls
+        ui_elements:
+          date_range:
+            type: date_range_picker
+            default: current_month
+            required: true
+          filters:
+            teams:
+              type: multiselect
+              source: data.teams
+              default: all
+            services:
+              type: multiselect
+              source: data.services
+              default: all
+            escalation_policies:
+              type: multiselect
+              source: data.escalation_policies
+              default: all
+          top_n:
+            type: dropdown
+            options: [5, 10, 20, all]
+            default: 10
+          run_button:
+            type: button
+            label: "Run report"
+
+  - id: DATA
+    title: Data Collection
+    type: data
+    description: >
+      Fetch raw data from PagerDuty API.
+    cells:
+      - type: code
+        name: fetch_incidents
+        logging: verbose
+        steps:
+          - log: "Fetching incidents from PagerDuty API"
+          - fetch:
+              endpoint: /incidents
+              params:
+                since: ui.date_range.start
+                until: ui.date_range.end
+              pagination: true
+          - normalize: incidents
+
+      - type: code
+        name: fetch_metadata
+        logging: verbose
+        steps:
+          - fetch: /services
+          - fetch: /teams
+          - fetch: /escalation_policies
+          - normalize: metadata
+
+  - id: CACHE
+    title: Data Caching
+    type: cache
+    description: >
+      Cache raw API responses to disk to avoid repeated API calls.
+    cells:
+      - type: code
+        name: cache_layer
+        strategy: disk
+        inputs:
+          - incidents
+          - metadata
+        outputs:
+          - cached_incidents
+          - cached_metadata
+        behavior:
+          ttl_hours: globals.CACHE_TTL_HOURS
+          on_hit: log "Using cached PagerDuty data"
+          on_miss: log "Cache miss, fetching from API"
+
+  - id: CALC
+    title: Calculations
+    type: calculation
+    description: >
+      Core attribution logic and metrics.
+    cells:
+      - type: code
+        name: base_metrics
+        logging: verbose
+        calculations:
+          total_alerts: count_unique(alert_id)
+          cost_per_alert:
+            formula: MONTHLY_PAGERDUTY_COST_USD / total_alerts
+
+      - type: code
+        name: aggregations
+        calculations:
+          by_service:
+            group_by: service
+            metrics: [alert_count, cost_usd]
+          by_team:
+            group_by: team
+            metrics: [alert_count, cost_usd]
+          by_escalation_policy:
+            group_by: escalation_policy
+            metrics: [alert_count, cost_usd]
+          alerts_over_time:
+            group_by: day
+            metrics: [alert_count]
+
+  - id: VISUAL
+    title: Visualizations
+    type: visualization
+    description: >
+      Charts and tables for analysis.
+    cells:
+      - type: chart
+        name: top_services_by_cost
+        chart_type: bar
+        data: by_service
+        sort: desc
+        limit: ui.top_n
+
+      - type: chart
+        name: cost_by_team
+        chart_type: bar
+        data: by_team
+        sort: desc
+
+      - type: chart
+        name: cost_by_escalation_policy
+        chart_type: bar
+        data: by_escalation_policy
+        sort: desc
+
+      - type: table
+        name: service_table
+        data: by_service
+
+      - type: table
+        name: team_table
+        data: by_team
+
+      - type: chart
+        name: alerts_over_time
+        chart_type: time_series
+        data: alerts_over_time
+
+  - id: EXECUTIVE
+    title: Executive Summary
+    type: executive
+    description: >
+      Auto-generated, neutral, fact-based findings for management.
+    cells:
+      - type: markdown
+        name: executive_findings
+        auto_generate: true
+        tone: neutral
+        rules:
+          - highlight cost concentration
+          - reference top services and teams
+          - avoid blame or prescriptive language
+        examples:
+          - "X services account for Y% of total PagerDuty alert cost."
+          - "PagerDuty cost attribution is concentrated across a limited number of escalation policies."
+
+metadata:
+  reproducible: true
+  requires_env_vars:
+    - PAGERDUTY_API_TOKEN
+  outputs:
+    - charts
+    - tables
+    - executive_summary
+
